@@ -4,12 +4,20 @@ import type { GeoResult } from './types';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+  },
+});
 
 export const EDGE_FUNCTION_URL = `${supabaseUrl}/functions/v1/geolocate`;
 
 export async function geolocateIps(ips: string[]): Promise<GeoResult[]> {
   if (ips.length === 0) return [];
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  const userToken = sessionData.session?.access_token;
 
   const response = await fetch(EDGE_FUNCTION_URL, {
     method: 'POST',
@@ -17,7 +25,7 @@ export async function geolocateIps(ips: string[]): Promise<GeoResult[]> {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${supabaseAnonKey}`,
     },
-    body: JSON.stringify({ ips }),
+    body: JSON.stringify({ ips, user_token: userToken }),
   });
 
   if (!response.ok) {

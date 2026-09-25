@@ -42,7 +42,6 @@ function classifyNetwork(org: string, isp: string): { isHosting: boolean; isSusp
 }
 
 async function lookupIp(ip: string): Promise<GeoResult> {
-  // Use ip-api.com (free, no key required, 45 req/min limit)
   const url = `http://ip-api.com/json/${ip}?fields=status,message,continent,country,countryCode,region,regionName,city,lat,lon,timezone,isp,org,as,asname,query`;
   const resp = await fetch(url);
   const data = await resp.json();
@@ -84,6 +83,7 @@ Deno.serve(async (req: Request) => {
 
     const body = await req.json();
     const ips: string[] = body.ips || [];
+    const userToken: string | undefined = body.user_token;
 
     if (!Array.isArray(ips) || ips.length === 0) {
       return new Response(
@@ -92,15 +92,25 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Check cache first
-    const { data: cached } = await supabase
-      .from("ip_geolocation_cache")
-      .select("*")
-      .in("ip_address", ips);
+    // Get the user ID from the token if provided
+    let userId: string | null = null;
+    if (userToken) {
+      const { data: userData } = await supabase.auth.getUser(userToken);
+      userId = userData.user?.id ?? null;
+    }
 
-    const cacheMap = new Map<string, GeoResult>();
-    for (const row of cached || []) {
-      cacheMap.set(row.ip_address, row as GeoResult);
+    // Check cache for this user
+    let cacheMap = new Map<string, GeoResult>();
+    if (userId) {
+      const { data: cached } = await supabase
+        .from("ip_geolocation_cache")
+        .select("*")
+        .eq("user_id", userId)
+        .in("ip_address", ips);
+
+      for (const row of cached || []) {
+        cacheMap.set(row.ip_address, row as GeoResult);
+      }
     }
 
     const results: GeoResult[] = [];
@@ -114,16 +124,17 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Lookup uncached IPs (respect rate limit: sequential with small delay)
+    // Lookup uncached IPs
     for (const ip of toLookup) {
       try {
         const result = await lookupIp(ip);
         results.push(result);
 
-        // Upsert into cache
+        // Upsert into cache with user_id
         await supabase
           .from("ip_geolocation_cache")
           .upsert({
+            user_id: userId,
             ip_address: result.ip_address,
             country: result.country,
             country_code: result.country_code,
@@ -137,7 +148,7 @@ Deno.serve(async (req: Request) => {
             is_hosting_provider: result.is_hosting_provider,
             is_suspicious: result.is_suspicious,
             raw: result.raw,
-          }, { onConflict: "ip_address" });
+          }, { onConflict: "user_id,ip_address" });
       } catch (err) {
         results.push({
           ip_address: ip,

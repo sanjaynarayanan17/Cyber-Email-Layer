@@ -90,8 +90,10 @@ export interface GeoResult {
 export interface EmailLog {
   id: string;
   case_id: string | null;
+  user_id: string;
   sender_email: string;
   sender_name: string;
+  sender_domain: string;
   subject: string;
   recipient_email: string;
   threat_score: number;
@@ -105,5 +107,7 @@ export interface EmailLog {
   extracted_ips: string[];
   extracted_links: ExtractedLink[];
   content_hash: string;
+  raw_email: string;
+  body: string;
   created_at: string;
 }
